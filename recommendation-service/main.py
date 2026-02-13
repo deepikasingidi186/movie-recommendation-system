@@ -145,3 +145,22 @@ def simulate_dependency(service_name: str, behavior: str):
     return {
         "message": f"{service_name} set to {behavior}"
     }
+
+def get_cb_state(cb: pybreaker.CircuitBreaker):
+    state = cb.current_state
+    return str(state).split('.')[-1]  # CLEAN STATE NAME
+
+@app.get("/metrics/circuit-breakers")
+def circuit_breaker_metrics():
+    return {
+        "userProfileCircuitBreaker": {
+            "state": get_cb_state(user_profile_cb),
+            "failCounter": user_profile_cb.fail_counter,
+            "successCounter": user_profile_cb._success_counter
+        },
+        "contentCircuitBreaker": {
+            "state": get_cb_state(content_cb),
+            "failCounter": content_cb.fail_counter,
+            "successCounter": content_cb._success_counter
+        }
+    }
