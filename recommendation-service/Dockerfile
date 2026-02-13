@@ -1,5 +1,8 @@
 FROM python:3.11-slim
 
+RUN apt-get update && apt-get install -y curl
+
+
 WORKDIR /app
 
 COPY requirements.txt .
@@ -10,6 +13,3 @@ COPY . .
 EXPOSE 8080
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
-git add .
-git commit -m "Added base recommendation-service"
-git push
