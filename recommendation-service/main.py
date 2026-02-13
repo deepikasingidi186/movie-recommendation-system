@@ -59,21 +59,47 @@ def get_movies():
 
 @app.get("/recommendations/{user_id}")
 def get_recommendations(user_id: str):
+
+    fallback_services = []
+
+    # Try user-profile
     try:
         user_data = get_user_preferences(user_id)
-        movies = get_movies()
-
-        # Filter movies based on user preferences
-        preferred_genres = user_data["preferences"]
-        recommended = [
-            movie for movie in movies
-            if movie["genre"] in preferred_genres
-        ]
-
-        return {
-            "userPreferences": user_data,
-            "recommendations": recommended
+    except pybreaker.CircuitBreakerError:
+        fallback_services.append("user-profile-service")
+        user_data = {
+            "userId": user_id,
+            "preferences": ["Comedy", "Family"]  # default fallback
         }
+    except Exception:
+        raise HTTPException(status_code=500, detail="User service error")
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Try content-service
+    try:
+        movies = get_movies()
+    except pybreaker.CircuitBreakerError:
+        fallback_services.append("content-service")
+        movies = []
+    except Exception:
+        raise HTTPException(status_code=500, detail="Content service error")
+
+    # If both are open → handle next step
+    if len(fallback_services) == 2:
+        raise HTTPException(status_code=503, detail="Both services unavailable")
+
+    preferred_genres = user_data["preferences"]
+
+    recommended = [
+        movie for movie in movies
+        if movie.get("genre") in preferred_genres
+    ]
+
+    response = {
+        "userPreferences": user_data,
+        "recommendations": recommended
+    }
+
+    if fallback_services:
+        response["fallback_triggered_for"] = ", ".join(fallback_services)
+
+    return response
