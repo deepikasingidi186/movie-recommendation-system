@@ -56,3 +56,24 @@ def get_movies():
 
     except (httpx.RequestError, httpx.HTTPStatusError, pybreaker.CircuitBreakerError):
         raise
+
+@app.get("/recommendations/{user_id}")
+def get_recommendations(user_id: str):
+    try:
+        user_data = get_user_preferences(user_id)
+        movies = get_movies()
+
+        # Filter movies based on user preferences
+        preferred_genres = user_data["preferences"]
+        recommended = [
+            movie for movie in movies
+            if movie["genre"] in preferred_genres
+        ]
+
+        return {
+            "userPreferences": user_data,
+            "recommendations": recommended
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
