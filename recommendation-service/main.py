@@ -35,24 +35,42 @@ def health():
 # -----------------------------
 
 def get_user_preferences(user_id: str):
-    @user_profile_cb
-    def call_user_service():
-        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-            response = client.get(f"{USER_PROFILE_URL}/users/{user_id}")
-            response.raise_for_status()
-            return response.json()
-    return call_user_service()
+    try:
+        @user_profile_cb
+        def call_user_service():
+            with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+                response = client.get(f"{USER_PROFILE_URL}/users/{user_id}")
+                response.raise_for_status()
+                return response.json()
 
+        result = call_user_service()
+        user_profile_window.append(True)
+        check_failure_rate(user_profile_cb, user_profile_window)
+        return result
+
+    except Exception:
+        user_profile_window.append(False)
+        check_failure_rate(user_profile_cb, user_profile_window)
+        raise
 
 def get_movies():
-    @content_cb
-    def call_content_service():
-        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-            response = client.get(f"{CONTENT_URL}/movies")
-            response.raise_for_status()
-            return response.json()
-    return call_content_service()
+    try:
+        @content_cb
+        def call_content_service():
+            with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+                response = client.get(f"{CONTENT_URL}/movies")
+                response.raise_for_status()
+                return response.json()
 
+        result = call_content_service()
+        content_window.append(True)
+        check_failure_rate(content_cb, content_window)
+        return result
+
+    except Exception:
+        content_window.append(False)
+        check_failure_rate(content_cb, content_window)
+        raise
 
 def get_trending_movies():
     with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
@@ -164,3 +182,21 @@ def circuit_breaker_metrics():
             "successCounter": content_cb._success_counter
         }
     }
+
+from collections import deque
+
+WINDOW_SIZE = int(os.getenv("CB_WINDOW_SIZE", 10))
+FAILURE_RATE_THRESHOLD = float(os.getenv("CB_FAILURE_RATE", 0.5))
+
+user_profile_window = deque(maxlen=WINDOW_SIZE)
+content_window = deque(maxlen=WINDOW_SIZE)
+
+def check_failure_rate(cb, window):
+    if len(window) == WINDOW_SIZE:
+        failure_count = window.count(False)
+        failure_rate = failure_count / WINDOW_SIZE
+
+        if failure_rate >= FAILURE_RATE_THRESHOLD:
+            cb.open()
+            window.clear()
+
