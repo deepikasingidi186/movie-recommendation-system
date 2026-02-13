@@ -118,3 +118,30 @@ def get_recommendations(user_id: str):
         response["fallback_triggered_for"] = ", ".join(fallback_services)
 
     return response
+
+@app.post("/simulate/{service_name}/{behavior}")
+def simulate_dependency(service_name: str, behavior: str):
+
+    if service_name not in ["user-profile", "content"]:
+        raise HTTPException(status_code=400, detail="Invalid service name")
+
+    if behavior not in ["normal", "slow", "fail"]:
+        raise HTTPException(status_code=400, detail="Invalid behavior")
+
+    target_url = ""
+
+    if service_name == "user-profile":
+        target_url = f"{USER_PROFILE_URL}/internal/simulate/{behavior}"
+    elif service_name == "content":
+        target_url = f"{CONTENT_URL}/internal/simulate/{behavior}"
+
+    try:
+        with httpx.Client(timeout=5) as client:
+            response = client.post(target_url)
+            response.raise_for_status()
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to update dependency state")
+
+    return {
+        "message": f"{service_name} set to {behavior}"
+    }
