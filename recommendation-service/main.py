@@ -2,7 +2,6 @@ from fastapi import FastAPI, HTTPException
 import httpx
 import os
 import pybreaker
-import time
 
 app = FastAPI()
 
@@ -25,44 +24,53 @@ content_cb = pybreaker.CircuitBreaker(
     reset_timeout=OPEN_DURATION
 )
 
+
 @app.get("/health")
 def health():
     return {"status": "healthy"}
 
+
+# -----------------------------
+# Protected Dependency Calls
+# -----------------------------
+
 def get_user_preferences(user_id: str):
-    try:
-        @user_profile_cb
-        def call_user_service():
-            with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-                response = client.get(f"{USER_PROFILE_URL}/users/{user_id}")
-                response.raise_for_status()
-                return response.json()
+    @user_profile_cb
+    def call_user_service():
+        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+            response = client.get(f"{USER_PROFILE_URL}/users/{user_id}")
+            response.raise_for_status()
+            return response.json()
+    return call_user_service()
 
-        return call_user_service()
-
-    except (httpx.RequestError, httpx.HTTPStatusError, pybreaker.CircuitBreakerError):
-        raise
 
 def get_movies():
-    try:
-        @content_cb
-        def call_content_service():
-            with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-                response = client.get(f"{CONTENT_URL}/movies")
-                response.raise_for_status()
-                return response.json()
+    @content_cb
+    def call_content_service():
+        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+            response = client.get(f"{CONTENT_URL}/movies")
+            response.raise_for_status()
+            return response.json()
+    return call_content_service()
 
-        return call_content_service()
 
-    except (httpx.RequestError, httpx.HTTPStatusError, pybreaker.CircuitBreakerError):
-        raise
+def get_trending_movies():
+    with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+        response = client.get(f"{TRENDING_URL}/trending")
+        response.raise_for_status()
+        return response.json()
+
+
+# -----------------------------
+# Main Recommendations Endpoint
+# -----------------------------
 
 @app.get("/recommendations/{user_id}")
 def get_recommendations(user_id: str):
 
     fallback_services = []
 
-    # Try user-profile
+    # Try user-profile service
     try:
         user_data = get_user_preferences(user_id)
     except pybreaker.CircuitBreakerError:
@@ -83,10 +91,17 @@ def get_recommendations(user_id: str):
     except Exception:
         raise HTTPException(status_code=500, detail="Content service error")
 
-    # If both are open → handle next step
+    # If both circuits are OPEN → Final fallback
     if len(fallback_services) == 2:
-        raise HTTPException(status_code=503, detail="Both services unavailable")
+        trending = get_trending_movies()
 
+        return {
+            "message": "Our recommendation service is temporarily degraded. Here are some trending movies.",
+            "trending": trending,
+            "fallback_triggered_for": ", ".join(fallback_services)
+        }
+
+    # Normal or single fallback case
     preferred_genres = user_data["preferences"]
 
     recommended = [
